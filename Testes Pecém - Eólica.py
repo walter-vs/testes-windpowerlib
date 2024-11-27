@@ -6,54 +6,84 @@ import requests
 import logging
 from windpowerlib import ModelChain, WindTurbine, create_power_curve
 
-try:
-    from matplotlib import pyplot as plt
-except ImportError:
-    plt = None
-
 # Conectando à API do Copernicus
-c = cdsapi.Client()
+# Adicionar credenciais do site https://cds.climate.copernicus.eu/how-to-api
+# A sintaxe da API do CDS foi alterada e algumas chaves ou nomes de parâmetros também podem ter sido alterados.
+
+key="27e343e8-a2ca-4a3a-8106-ce8100054f28"
+
+c = cdsapi.Client(url='https://cds.climate.copernicus.eu/api', key=key)
 
 # Ponto específico (latitude, longitude)
 latitude = -3.57168   # Exemplo
 longitude = -38.84797  # Exemplo
 
+# Definindo uma área de 0.5 graus ao redor do ponto de interesse
+latitude_norte = latitude + 0.25
+longitude_oeste = longitude - 0.25
+latitude_sul = latitude - 0.25
+longitude_leste = longitude + 0.25
+
 # Solicitação dos dados do ERA5
-result = c.retrieve(
-    'reanalysis-era5-single-levels',
-    {
-        'product_type': 'reanalysis',
-        'variable': [
-            '10m_u_component_of_wind', '10m_v_component_of_wind',
-            '100m_u_component_of_wind', '100m_v_component_of_wind',
-            '2m_temperature', 'temperature_100m',
-            'surface_roughness', 'surface_pressure'
+dataset = 'reanalysis-era5-single-levels'
+request = {
+        'product_type': ['reanalysis'],
+        'variable': ['2m_temperature',
+                     '10m_u_component_of_wind',
+                     '10m_v_component_of_wind',
+                     '100m_u_component_of_wind',
+                     '100m_v_component_of_wind',
+                     'surface_pressure',
+                     'surface_roughness'
         ],
-        'year': '2023',
-        'month': '11',
-        'day': '01',
-        'time': '12:00',
-        'format': 'netcdf',
-        'area': [latitude, longitude, latitude, longitude],  # ponto específico
-    }
-)
+        'year': ['2023'],
+        'month': ['01', '02','03'],
+        'day':['01', '02', '03',
+                '04', '05', '06', '07',
+                '08', '09', '10', '11',
+                '12', '13', '14', '15'
+              ],
+        'time':[
+            '00:00', '01:00', '02:00',
+            '03:00', '04:00', '05:00',
+            '06:00', '07:00', '08:00',
+            '09:00', '10:00', '11:00',
+            '12:00', '13:00', '14:00',
+            '15:00', '16:00', '17:00',
+            '18:00', '19:00', '20:00',
+            '21:00', '22:00', '23:00'
+               ],
+        'pressure_level':['1000'],
+        'data_format': 'nc',
+        #'area': [latitude_norte, longitude_oeste, latitude_sul, longitude_leste],
+}
 
-# Baixar os dados em um arquivo local
-result.download('era5_data.nc')
+target = 'datasets/era5_data9.nc'
 
-# Carregar o arquivo NetCDF
-data = xr.open_dataset('era5_data.nc')
+# Solicita ao servidor os dados
+# Accepted. Each request is assigned a unique ID and a priority. The priority is chosen according to different criteria, such as the origin of the request (CDS web interface/API/Toolbox). For example, the CDS web interface usually has higher priority because it is an interactive application and users expect an immediate response to their request..
+# In progress. The request is being fulfilled and the data is being collected from the archive.
+# Failed. The request encountered problems.
+# Unavailable. The data has expired from cache and therefore cannot be retrieved at the current time. In this case the request should be resubmitted.
+# Succeded. The resulting data file is ready to download.
+
+# O limite de consultas sa
+
+result = c.retrieve(dataset, request, target)
+
+ds=xr.open_dataset(filename_or_obj='datasets/era5_data9.nc')
+    
 
 # Extraindo os dados em um DataFrame do Pandas
 df = pd.DataFrame({
-    'wind_speed_10m_u': data['u10'].values.flatten(),
-    'wind_speed_10m_v': data['v10'].values.flatten(),
-    'wind_speed_100m_u': data['u100'].values.flatten(),
-    'wind_speed_100m_v': data['v100'].values.flatten(),
-    'temperature_2m': data['t2m'].values.flatten(),
-    'temperature_100m': data['t100'].values.flatten(),
-    'surface_roughness': data['z0'].values.flatten(),
-    'surface_pressure': data['sp'].values.flatten()
+    'wind_speed_10m_u': ds['u10'].values.flatten(),
+    'wind_speed_10m_v': ds['v10'].values.flatten(),
+    'wind_speed_100m_u': ds['u100'].values.flatten(),
+    'wind_speed_100m_v': ds['v100'].values.flatten(),
+    'temperature_2m': ds['t2m'].values.flatten(),
+    'temperature_100m': ds['t100'].values.flatten(),
+    #'surface_roughness': data['z0'].values.flatten(),
+    'surface_pressure': ds['sp'].values.flatten()
 })
 
 # Salvando o DataFrame em um arquivo CSV
@@ -216,59 +246,3 @@ def calculate_power_output(weather, e126):
     e126.power_output = mc_e126.power_output
 
     return
-
-
-def plot_or_print(e126):
-    r"""
-    Plots or prints power output and power (coefficient) curves.
-
-    Parameters
-    ----------
-    e126 : :class:`~.wind_turbine.WindTurbine`
-        WindTurbine object with power curve from the OpenEnergy Database
-        turbine library.
-    """
-
-    # plot or print turbine power output
-    if plt:
-        e126.power_output.plot(legend=True, label="Enercon E126")
-        plt.xlabel("Time")
-        plt.ylabel("Power in W")
-        plt.show()
-    else:
-        print(e126.power_output)
-       
-    # plot or print power curve
-    if plt:
-        if e126.power_curve is not False:
-            e126.power_curve.plot(
-                x="wind_speed",
-                y="value",
-                style="*",
-                title="Enercon E126 power curve",
-            )
-            plt.xlabel("Wind speed in m/s")
-            plt.ylabel("Power coefficient $\mathrm{C}_\mathrm{P}$")
-            plt.show()
-      
-
-
-def run_example():
-    r"""
-    Runs the basic example.
-
-    """
-    # You can use the logging package to get logging messages from the
-    # windpowerlib. Change the logging level if you want more or less messages:
-    # logging.DEBUG -> many messages
-    # logging.INFO -> few messages
-    logging.getLogger().setLevel(logging.DEBUG)
-
-    weather = get_weather_data("weather.csv")
-    my_turbine, e126, my_turbine2 = initialize_wind_turbines()
-    calculate_power_output(weather, my_turbine, e126, my_turbine2)
-    plot_or_print(my_turbine, e126, my_turbine2)
-
-
-if __name__ == "__main__":
-    run_example()
